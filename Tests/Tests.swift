@@ -1,10 +1,15 @@
 import XCTest
+
 @testable import TerminalRunner
 
 final class Tests: XCTestCase {
-    func testExample() throws {
-        // This is an example of a functional test case.
-        // Use XCTAssert and related functions to verify your tests produce the correct
-        // results.
+    
+    func testList() throws {
+        try TerminalRunner(executable: "ls", currentDirectoryURL: .init(fileURLWithPath: NSHomeDirectory())).makeRunnerFuture("-ah").wait()
+    }
+    
+    func testWhich() throws {
+        let runner = TerminalRunner(executableURL: .init(fileURLWithPath: "/usr/bin/which"))
+        XCTAssertNil(runner)
     }
 }

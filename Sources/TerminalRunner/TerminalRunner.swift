@@ -85,6 +85,7 @@ extension TerminalRunner {
             self.terminationQueue.isSuspended = true
         }
         
+        @discardableResult
         public func wait() throws -> Message {
             var result: Message = .output(.init())
             read { result += $0 }
