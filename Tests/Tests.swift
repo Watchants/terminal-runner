@@ -1,11 +1,10 @@
 import XCTest
-@testable import terminal_runner
+@testable import TerminalRunner
 
-final class terminal_runnerTests: XCTestCase {
+final class Tests: XCTestCase {
     func testExample() throws {
         // This is an example of a functional test case.
         // Use XCTAssert and related functions to verify your tests produce the correct
         // results.
-        XCTAssertEqual(terminal_runner().text, "Hello, World!")
     }
 }

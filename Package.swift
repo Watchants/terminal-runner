@@ -5,24 +5,30 @@ import PackageDescription
 
 let package = Package(
     name: "terminal-runner",
+    platforms: [
+        .macOS(.v10_13),
+    ],
     products: [
-        // Products define the executables and libraries a package produces, and make them visible to other packages.
+        .executable(
+            name: "Examples",
+            targets: ["Examples"]),
         .library(
-            name: "terminal-runner",
-            targets: ["terminal-runner"]),
+            name: "TerminalRunner",
+            targets: ["TerminalRunner"]),
     ],
     dependencies: [
-        // Dependencies declare other packages that this package depends on.
-        // .package(url: /* package url */, from: "1.0.0"),
+        
     ],
     targets: [
-        // Targets are the basic building blocks of a package. A target can define a module or a test suite.
-        // Targets can depend on other targets in this package, and on products in packages this package depends on.
         .target(
-            name: "terminal-runner",
+            name: "TerminalRunner",
             dependencies: []),
+        .executableTarget(
+            name: "Examples",
+            dependencies: ["TerminalRunner"]),
         .testTarget(
-            name: "terminal-runnerTests",
-            dependencies: ["terminal-runner"]),
+            name: "TerminalRunnerTests",
+            dependencies: ["TerminalRunner"],
+            path: "Tests"),
     ]
 )
