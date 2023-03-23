@@ -5,7 +5,7 @@ import XCTest
 final class Tests: XCTestCase {
     
     func testList() throws {
-        try TerminalRunner(executable: "ls", currentDirectoryURL: .init(fileURLWithPath: NSHomeDirectory())).makeRunnerFuture("-ah").wait()
+        try TerminalRunner(executable: "ls", currentDirectoryURL: .init(fileURLWithPath: NSHomeDirectory())).wait("-ah")
     }
     
     func testWhich() throws {

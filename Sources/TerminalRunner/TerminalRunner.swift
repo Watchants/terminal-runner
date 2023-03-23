@@ -26,12 +26,54 @@ public final class TerminalRunner {
         self.init(executableURL: executableURL, environment: environment, currentDirectoryURL: currentDirectoryURL)
     }
     
-    public func makeRunnerFuture(_ arguments: String...) throws -> Future {
-        return try .init(runner: self).launch(arguments)
+    @discardableResult
+    public func makeRunnerFuture(_ arguments: String..., block: @escaping (Message) -> Void) throws -> Future {
+        return try .init(runner: self, read: block).launch(arguments)
     }
     
-    public func makeRunnerFuture(_ arguments: [String]) throws -> Future {
-        return try .init(runner: self).launch(arguments)
+    @discardableResult
+    public func makeRunnerFuture(_ arguments: [String], block: @escaping (Message) -> Void) throws -> Future {
+        return try .init(runner: self, read: block).launch(arguments)
+    }
+    
+    @discardableResult
+    public func wait(_ arguments: String...) throws -> (future: Future, messages: [Message]) {
+        try wait(arguments)
+    }
+    
+    @discardableResult
+    public func wait(_ arguments: [String]) throws -> (future: Future, messages: [Message]) {
+        var messages: [Message] = []
+        let future = try makeRunnerFuture(arguments) { message in
+            messages.append(message)
+        }
+        let semaphore: DispatchSemaphore = .init(value: 0)
+        future.termination { _ in
+            semaphore.signal()
+        }
+        semaphore.wait()
+        return (future, messages)
+    }
+    
+    @available(macOS 10.15.0, *)
+    @discardableResult
+    public func async(_ arguments: String...) async throws -> (future: Future, messages: [Message]) {
+        return try await async(arguments)
+    }
+    
+    @available(macOS 10.15.0, *)
+    @discardableResult
+    public func async(_ arguments: [String]) async throws -> (future: Future, messages: [Message]) {
+        return try await withUnsafeThrowingContinuation { continuation in
+        OperationQueue().addOperation {
+                do {
+                    let result = try self.wait(arguments)
+                    continuation.resume(returning: result)
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
     }
 }
 
@@ -48,8 +90,10 @@ extension TerminalRunner {
             return url
         } else {
             let runner = TerminalRunner(executableURL: .init(fileURLWithPath: "/usr/bin/which"), environment: environment, currentDirectoryURL: currentDirectoryURL)
-            if let message = try runner.makeRunnerFuture(executable).wait().readlines?.first {
-                return .init(fileURLWithPath: message)
+            
+            let (_, messages) = try runner.wait(executable)
+            if let message = messages.message?.split(separator: "\n").first {
+                return .init(fileURLWithPath: .init(message))
             } else {
                 throw Error.notfound(executable)
             }
@@ -63,6 +107,8 @@ extension TerminalRunner {
         
         public let runner: TerminalRunner
         
+        public private(set) var status: Status
+        
         private let process: Process
         
         private let standardInput: Pipe
@@ -75,7 +121,7 @@ extension TerminalRunner {
         
         private var readReadabilityHandler: ((Message) -> Void)?
         
-        internal init(runner: TerminalRunner) {
+        internal init(runner: TerminalRunner, read: @escaping (Message) -> Void) {
             self.runner = runner
             self.process = .init()
             self.standardInput = .init()
@@ -83,27 +129,29 @@ extension TerminalRunner {
             self.standardError = .init()
             self.terminationQueue = .init()
             self.terminationQueue.isSuspended = true
-        }
-        
-        @discardableResult
-        public func wait() throws -> Message {
-            var result: Message = .output(.init())
-            read { result += $0 }
-            let semaphore = DispatchSemaphore(value: 0)
-            terminationQueue.addOperation {
-                semaphore.signal()
-            }
-            semaphore.wait()
-            return result
-        }
-        
-        public func read(_ body: @escaping (Message) -> Void) {
-            readReadabilityHandler = body
+            
+            self.status = .idle
+            self.readReadabilityHandler = read
         }
         
         public func write(_ data: Data) throws {
             standardInput.fileHandleForWriting.write(data)
         }
+        
+        public func termination(block: @escaping (Status) -> Void) {
+            terminationQueue.addOperation { [self] in
+                block(status)
+            }
+        }
+    }
+    
+    public enum Status {
+        
+        case idle
+        
+        case running
+        
+        case completed(Int32)
     }
     
     public enum Message {
@@ -112,18 +160,22 @@ extension TerminalRunner {
         
         case error(Data)
         
-        public var string: String? {
+        public var data: Data {
             switch self {
-            case .output(let data): return String(data: data, encoding: .utf8)
-            case .error(let data): return String(data: data, encoding: .utf8)
+            case .output(let data):
+                return data
+            case .error(let data):
+                return data
             }
         }
         
-        public var readlines: [String]? {
-            guard let string = string else {
-                return nil
+        public var string: String? {
+            switch self {
+            case .output(let data):
+                return String(data: data, encoding: .utf8)
+            case .error(let data):
+                return String(data: data, encoding: .utf8)
             }
-            return string.split(separator: "\n").map(String.init)
         }
         
         static func +=(lhs: inout Message, rhs: Message) {
@@ -197,6 +249,7 @@ extension TerminalRunner.Future {
         standardError.fileHandleForReading.readabilityHandler = standardErrorReadability(_:)
         
         try process.run()
+        status = .running
         
         OperationQueue().addOperation { [self] in
             let group = DispatchGroup()
@@ -205,6 +258,7 @@ extension TerminalRunner.Future {
                 group.leave()
             }
             group.wait()
+            status = .completed(process.terminationStatus)
             standardOutput.fileHandleForReading.readabilityHandler = nil
             standardError.fileHandleForReading.readabilityHandler =  nil
             readReadabilityHandler = nil
@@ -212,5 +266,15 @@ extension TerminalRunner.Future {
         }
         
         return self
+    }
+}
+
+extension Array where Element == TerminalRunner.Message {
+    
+    public var message: String? {
+        let data = reduce(into: Data()) { data, message in
+            data.append(contentsOf: message.data)
+        }
+        return .init(data: data, encoding: .utf8)
     }
 }
