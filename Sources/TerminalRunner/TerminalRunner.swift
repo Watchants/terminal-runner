@@ -21,82 +21,86 @@ public final class TerminalRunner {
         self.currentDirectoryURL = currentDirectoryURL
     }
     
-    public convenience init(executable: String, environment: [String: String]? = nil, currentDirectoryURL: URL? = nil) throws {
-        let executableURL = try TerminalRunner.which(executable: executable, environment: environment, currentDirectoryURL: currentDirectoryURL)
-        self.init(executableURL: executableURL, environment: environment, currentDirectoryURL: currentDirectoryURL)
+    public convenience init(executable: String, environment: [String: String]? = nil, currentDirectoryURL: URL? = nil) async throws {
+        let executableURL = try await TerminalRunner.which(
+            executable: executable,
+            environment: environment,
+            currentDirectoryURL: currentDirectoryURL
+        )
+        self.init(
+            executableURL: executableURL,
+            environment: environment,
+            currentDirectoryURL: currentDirectoryURL
+        )
     }
     
-    @discardableResult
-    public func makeRunnerFuture(_ arguments: String..., block: @escaping (Message) -> Void) throws -> Future {
-        return try .init(runner: self, read: block).launch(arguments)
+    public func makeRunnerFuture(_ arguments: [String], body: @escaping (Message) -> Void) throws -> Future {
+        try .init(runner: self, body: body).launch(arguments)
     }
     
-    @discardableResult
-    public func makeRunnerFuture(_ arguments: [String], block: @escaping (Message) -> Void) throws -> Future {
-        return try .init(runner: self, read: block).launch(arguments)
+    public func makeRunnerFuture(_ arguments: String..., body: @escaping (Message) -> Void) throws -> Future {
+        try makeRunnerFuture(arguments, body: body)
     }
     
-    @discardableResult
-    public func wait(_ arguments: String...) throws -> (future: Future, messages: [Message]) {
-        try wait(arguments)
-    }
-    
-    @discardableResult
-    public func wait(_ arguments: [String]) throws -> (future: Future, messages: [Message]) {
-        var messages: [Message] = []
+    public func make(_ arguments: String...) async throws -> [Message] {
+        var messages = [Message]()
         let future = try makeRunnerFuture(arguments) { message in
             messages.append(message)
         }
-        let semaphore: DispatchSemaphore = .init(value: 0)
-        future.termination { _ in
-            semaphore.signal()
-        }
-        semaphore.wait()
-        return (future, messages)
+        try await future.wait()
+        return messages
     }
     
-    @available(macOS 10.15.0, *)
-    @discardableResult
-    public func async(_ arguments: String...) async throws -> (future: Future, messages: [Message]) {
-        return try await async(arguments)
-    }
+}
+
+extension TerminalRunner.Future {
     
-    @available(macOS 10.15.0, *)
-    @discardableResult
-    public func async(_ arguments: [String]) async throws -> (future: Future, messages: [Message]) {
-        return try await withUnsafeThrowingContinuation { continuation in
-        OperationQueue().addOperation {
-                do {
-                    let result = try self.wait(arguments)
-                    continuation.resume(returning: result)
-                } catch {
-                    continuation.resume(throwing: error)
-                }
+    public func wait() async throws {
+        try await withUnsafeThrowingContinuation { continuation in
+            do {
+                try _wait().get()
+                continuation.resume()
+            } catch {
+                continuation.resume(throwing: error)
             }
         }
     }
+    
+    private func _wait() -> Result<Void, Error>  {
+        let semaphore: DispatchSemaphore = .init(value: 0)
+        var result = Result<Void, Error>.failure(Error("Something unexpected happened"))
+        termination { status in
+            switch status {
+            case .running, .idle:
+                result = .failure(Error("Something unexpected happened"))
+            case .completed(let status):
+                if status == 0 {
+                    result = .success(())
+                } else {
+                    result = .failure(Error("TerminalRunner ended with exit code:\(status)"))
+                }
+            }
+            semaphore.signal()
+        }
+        semaphore.wait()
+        return result
+    }
+    
 }
 
 extension TerminalRunner {
     
-    private static var caches: [String: URL] = [:]
-    
-    private static var semaphore: DispatchSemaphore = .init(value: 1)
-    
-    private static func which(executable: String, environment: [String: String]? = nil, currentDirectoryURL: URL? = nil) throws -> URL {
-        semaphore.wait()
-        defer { semaphore.signal() }
-        if let url = caches[executable] {
-            return url
+    private static func which(executable: String, environment: [String: String]? = nil, currentDirectoryURL: URL? = nil) async throws -> URL {
+        let runner = TerminalRunner(
+            executableURL: .init(fileURLWithPath: "/usr/bin/which"),
+            environment: environment,
+            currentDirectoryURL: currentDirectoryURL
+        )
+        let messages = try await runner.make(executable)
+        if let path = messages.message?.split(separator: "\n").first {
+            return .init(fileURLWithPath: .init(path))
         } else {
-            let runner = TerminalRunner(executableURL: .init(fileURLWithPath: "/usr/bin/which"), environment: environment, currentDirectoryURL: currentDirectoryURL)
-            
-            let (_, messages) = try runner.wait(executable)
-            if let message = messages.message?.split(separator: "\n").first {
-                return .init(fileURLWithPath: .init(message))
-            } else {
-                throw Error.notfound(executable)
-            }
+            throw Error("command not found: \(executable)")
         }
     }
 }
@@ -121,7 +125,8 @@ extension TerminalRunner {
         
         private var readReadabilityHandler: ((Message) -> Void)?
         
-        internal init(runner: TerminalRunner, read: @escaping (Message) -> Void) {
+        internal init(runner: TerminalRunner, body: @escaping (Message) -> Void) {
+            self.status = .idle
             self.runner = runner
             self.process = .init()
             self.standardInput = .init()
@@ -129,9 +134,7 @@ extension TerminalRunner {
             self.standardError = .init()
             self.terminationQueue = .init()
             self.terminationQueue.isSuspended = true
-            
-            self.status = .idle
-            self.readReadabilityHandler = read
+            self.readReadabilityHandler = body
         }
         
         public func write(_ data: Data) throws {
@@ -196,10 +199,6 @@ extension TerminalRunner {
         }
     }
     
-    public enum Error: Swift.Error {
-        
-        case notfound(String)
-    }
 }
 
 extension TerminalRunner.Future {
@@ -277,4 +276,5 @@ extension Array where Element == TerminalRunner.Message {
         }
         return .init(data: data, encoding: .utf8)
     }
+    
 }

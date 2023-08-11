@@ -1,13 +1,14 @@
 import Foundation
 import TerminalRunner
 
-try TerminalRunner(executable: "xcodebuild").makeRunnerFuture("-h") { message in
-    guard let string = message.string else {
-        return
+let runner = try await TerminalRunner(executable: "xcodebuild")
+let future = try runner.makeRunnerFuture("-h") { message in
+    if let string = message.string {
+        print(string)
     }
-    print(string)
 }
+try await future.wait()
 
-print(try TerminalRunner(executable: "ls", currentDirectoryURL: .init(fileURLWithPath: NSHomeDirectory())).wait("-ah").messages.message!)
+print(try await TerminalRunner(executable: "ls", currentDirectoryURL: .init(fileURLWithPath: NSHomeDirectory())).make().message!)
 
-RunLoop.main.run()
+//RunLoop.main.run()

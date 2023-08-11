@@ -6,7 +6,7 @@ import PackageDescription
 let package = Package(
     name: "terminal-runner",
     platforms: [
-        .macOS(.v10_13),
+        .macOS(.v10_15),
     ],
     products: [
         .executable(

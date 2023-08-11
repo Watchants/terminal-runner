@@ -4,12 +4,15 @@ import XCTest
 
 final class Tests: XCTestCase {
     
-    func testList() throws {
-        try TerminalRunner(executable: "ls", currentDirectoryURL: .init(fileURLWithPath: NSHomeDirectory())).wait("-ah")
+    func testList() async throws {
+        _ = try await TerminalRunner(
+            executable: "ls",
+            currentDirectoryURL: .init(fileURLWithPath: NSHomeDirectory())
+        ).make("-ah")
     }
     
     func testWhich() throws {
         let runner = TerminalRunner(executableURL: .init(fileURLWithPath: "/usr/bin/which"))
-        XCTAssertNil(runner)
+        XCTAssertNotNil(runner)
     }
 }
