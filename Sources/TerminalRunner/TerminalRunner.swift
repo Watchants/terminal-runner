@@ -43,6 +43,10 @@ public final class TerminalRunner {
     }
     
     public func make(_ arguments: String...) async throws -> [Message] {
+        try await make(arguments)
+    }
+    
+    public func make(_ arguments: [String]) async throws -> [Message] {
         var messages = [Message]()
         let future = try makeRunnerFuture(arguments) { message in
             messages.append(message)
